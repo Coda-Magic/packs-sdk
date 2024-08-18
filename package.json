@@ -1,6 +1,6 @@
 {
-  "name": "@codahq/packs-sdk",
-  "version": "1.7.9-prerelease.3",
+  "name": "@troylar/coda-packs-sdk",
+  "version": "0.0.1",
   "license": "MIT",
   "workspaces": [
     "dev/eslint"
@@ -16,10 +16,10 @@
   "typings": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/coda/packs-sdk"
+    "url": "https://github.com/Coda-Magic/packs-sdk"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "restricted"
   },
   "dependencies": {
     "@aws-crypto/sha256-js": "4.0.0",
