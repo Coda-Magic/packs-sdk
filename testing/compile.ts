@@ -9,9 +9,7 @@ import {getPackOptions} from '../cli/config_storage';
 import {importManifest} from '../cli/helpers';
 import os from 'os';
 import path from 'path';
-import {processVmError} from './helpers';
 import semver from 'semver';
-import {tryGetIvm} from './ivm_wrapper';
 import uglify from 'uglify-js';
 import {v4} from 'uuid';
 
@@ -35,25 +33,6 @@ export interface CompilePackBundleResult {
   bundlePath: string;
   bundleSourceMapPath: string;
   intermediateOutputDirectory: string;
-}
-
-async function loadIntoVM(bundlePath: string) {
-  const ivm = tryGetIvm();
-  if (!ivm) {
-    return;
-  }
-  const bundle = fs.readFileSync(bundlePath);
-
-  const isolate = new ivm.Isolate({memoryLimit: 128});
-  const ivmContext = await isolate.createContext();
-  // Setup the global object.
-  const jail = ivmContext.global;
-  await jail.set('global', jail.derefInto());
-  await jail.set('exports', {}, {copy: true});
-  await jail.set('codaInternal', {serializer: {}}, {copy: true});
-
-  const script = await isolate.compileScript(bundle.toString(), {filename: bundlePath});
-  await script.run(ivmContext);
 }
 
 type BuildFunction = (options: {
@@ -243,7 +222,7 @@ export async function compilePackBundle({
   ];
 
   if (minify) {
-    buildChain.push({builder: uglifyBundle, outputFilename: uglifyBundleFilename});
+    // buildChain.push({builder: uglifyBundle, outputFilename: uglifyBundleFilename});
   }
 
   // let the last step of the chain use bundleFilename for output name so that we don't need to
@@ -264,47 +243,40 @@ export async function compilePackBundle({
 
   const tempBundlePath = filename;
 
-  // test if it can be loaded into isolated-vm.
-  // among all the packs. Google Drive (1059) won't load into IVM at this moment since it requires jimp
-  // which uses gifcodec, which calls process.nextTick on the global level.
-  // maybe we just need to get rid of jimp and resize-optimize-images instead.
-  try {
-    await loadIntoVM(tempBundlePath);
-  } catch (err: any) {
-    throw await processVmError(err, tempBundlePath);
-  }
-
   // Write the generated metadata. It's not used by the upload command, but
   // it's helpful for debugging upload validation errors.
-  const manifest = await importManifest<PackVersionDefinition>(tempBundlePath);
-  const metadata = compilePackMetadata(manifest);
-  const tempMetadataPath = path.join(intermediateOutputDirectory, 'metadata.json');
-  fs.writeFileSync(tempMetadataPath, JSON.stringify(metadata));
+  try {
+    const manifest = await importManifest<PackVersionDefinition>(tempBundlePath);
+    const metadata = compilePackMetadata(manifest);
+    const tempMetadataPath = path.join(intermediateOutputDirectory, 'metadata.json');
+    fs.writeFileSync(tempMetadataPath, JSON.stringify(metadata));
 
-  if (!outputDirectory || outputDirectory === intermediateOutputDirectory) {
+    if (!outputDirectory || outputDirectory === intermediateOutputDirectory) {
+      return {
+        bundlePath: tempBundlePath,
+        intermediateOutputDirectory,
+        bundleSourceMapPath: `${tempBundlePath}.map`,
+      };
+    }
+
+    const bundlePath = path.join(outputDirectory, bundleFilename);
+    const bundleSourceMapPath = `${bundlePath}.map`;
+    const metadataPath = path.join(outputDirectory, 'metadata.json');
+
+    if (!fs.existsSync(outputDirectory)) {
+      fs.mkdirSync(outputDirectory, {recursive: true});
+    }
+
+    // move over finally compiled bundle & sourcemap to the target directory.
+    fs.copyFileSync(tempBundlePath, bundlePath);
+    fs.copyFileSync(tempMetadataPath, metadataPath);
+    fs.copyFileSync(`${tempBundlePath}.map`, bundleSourceMapPath);
     return {
-      bundlePath: tempBundlePath,
       intermediateOutputDirectory,
-      bundleSourceMapPath: `${tempBundlePath}.map`,
+      bundlePath,
+      bundleSourceMapPath,
     };
+  } catch (e) {
+    throw new Error(`Failed to import manifest: ${e}`);
   }
-
-  const bundlePath = path.join(outputDirectory, bundleFilename);
-  const bundleSourceMapPath = `${bundlePath}.map`;
-  const metadataPath = path.join(outputDirectory, 'metadata.json');
-
-  if (!fs.existsSync(outputDirectory)) {
-    fs.mkdirSync(outputDirectory, {recursive: true});
-  }
-
-  // move over finally compiled bundle & sourcemap to the target directory.
-  fs.copyFileSync(tempBundlePath, bundlePath);
-  fs.copyFileSync(tempMetadataPath, metadataPath);
-  fs.copyFileSync(`${tempBundlePath}.map`, bundleSourceMapPath);
-
-  return {
-    intermediateOutputDirectory,
-    bundlePath,
-    bundleSourceMapPath,
-  };
 }

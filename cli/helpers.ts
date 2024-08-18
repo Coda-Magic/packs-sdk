@@ -52,6 +52,7 @@ export function getPackAuth(packDef: BasicPackDefinition): Authentication | unde
 export async function importManifest<T extends BasicPackDefinition = BasicPackDefinition>(
   bundleFilename: string,
 ): Promise<T> {
+  console.log(`Importing manifest from ${path.resolve(bundleFilename)}`);
   const module = await import(path.resolve(bundleFilename));
   return module.pack || module.manifest;
 }
